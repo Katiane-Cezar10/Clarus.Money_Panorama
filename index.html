@@ -118,18 +118,19 @@
   .chart-box .chart-title { font-family:var(--font-mono); font-size:10.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--slate); margin-bottom:10px; }
   .chart-box svg { width:100%; height:auto; display:block; }
 
-  .cal-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
-  .cal-header .cal-month { font-family:var(--font-display); font-size:16px; font-weight:600; }
-  .cal-nav { background:var(--ink-3); border:none; color:var(--parchment); width:30px; height:30px; border-radius:8px; cursor:pointer; font-size:14px; }
-  .cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:4px; margin-bottom:16px; }
-  .cal-dow { text-align:center; font-family:var(--font-mono); font-size:9.5px; color:var(--slate); padding:4px 0; }
-  .cal-day { aspect-ratio:1; display:flex; align-items:center; justify-content:center; border-radius:8px; font-size:12px; background:var(--ink-3); color:var(--parchment); position:relative; }
+  .cal-box { max-width: 100%; }
+  .cal-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+  .cal-header .cal-month { font-family:var(--font-display); font-size:12.5px; font-weight:600; }
+  .cal-nav { background:var(--ink-3); border:none; color:var(--parchment); width:20px; height:20px; border-radius:5px; cursor:pointer; font-size:11px; line-height:1; padding:0; }
+  .cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:2px; margin-bottom:8px; }
+  .cal-dow { text-align:center; font-family:var(--font-mono); font-size:7.5px; color:var(--slate); padding:2px 0; }
+  .cal-day { aspect-ratio:1; display:flex; align-items:center; justify-content:center; border-radius:4px; font-size:9px; background:var(--ink-3); color:var(--parchment); position:relative; }
   .cal-day.empty { background:transparent; }
   .cal-day.has-asset { background:var(--danger); color:#fff; font-weight:700; cursor:pointer; }
   .cal-day.today { border:1px solid var(--brass); }
-  .cal-legend { font-size:12px; color:var(--slate); margin-bottom:6px; }
-  .cal-asset-list { font-size:12.5px; color:var(--parchment); }
-  .cal-asset-list .cal-asset-item { padding:8px 10px; background:var(--ink-3); border-radius:8px; margin-bottom:6px; }
+  .cal-legend { font-size:10px; color:var(--slate); margin-bottom:4px; }
+  .cal-asset-list { font-size:10.5px; color:var(--parchment); }
+  .cal-asset-list .cal-asset-item { padding:5px 7px; background:var(--ink-3); border-radius:6px; margin-bottom:4px; font-size:10.5px; }
 
   .vencendo-item { background:var(--ink-2); border:1px solid var(--ink-3); border-left:3px solid var(--danger); border-radius:10px; padding:14px 16px; margin-bottom:10px; cursor:pointer; }
   .vencendo-item .v-top { display:flex; justify-content:space-between; margin-bottom:4px; }
@@ -225,23 +226,33 @@
             <div class="chart-title">Por tipo</div>
             <div id="pieTipo"></div>
           </div>
-        </div>
-
-        <div class="chart-box" style="margin-bottom:22px;">
-          <div class="chart-title">Calendário de vencimentos</div>
-          <div class="cal-header">
-            <button class="cal-nav" onclick="calNav(-1)">‹</button>
-            <span class="cal-month" id="calMonthLabel"></span>
-            <button class="cal-nav" onclick="calNav(1)">›</button>
+          <div class="chart-box">
+            <div class="chart-title">Por corretora</div>
+            <div id="pieCorretora"></div>
           </div>
-          <div class="cal-grid" id="calGrid"></div>
-          <div id="calAssetList"></div>
+          <div class="chart-box cal-box">
+            <div class="chart-title">Vencimentos</div>
+            <div class="cal-header">
+              <button class="cal-nav" onclick="calNav(-1)">‹</button>
+              <span class="cal-month" id="calMonthLabel"></span>
+              <button class="cal-nav" onclick="calNav(1)">›</button>
+            </div>
+            <div class="cal-grid" id="calGrid"></div>
+            <div id="calAssetList"></div>
+          </div>
         </div>
 
         <div id="assetsList"></div>
 
         <div class="form-box">
           <div class="section-title" style="margin-top:0;">Adicionar novo ativo</div>
+
+          <div class="field">
+            <label>Colar informações do ativo (opcional)</label>
+            <textarea id="a_paste" rows="6" placeholder="Cole aqui o texto com as informações do ativo, um por linha (Corretora: ..., Nome: ..., Taxa: ..., etc.)"></textarea>
+          </div>
+          <button class="btn ghost" style="margin-bottom:20px;" onclick="parseAndFillAsset()">Incluir</button>
+
           <div class="form-grid">
             <div class="field" id="w_a_corretora"><label>Corretora</label><input type="text" id="a_corretora"><span class="field-error">Campo obrigatório.</span></div>
             <div class="field" id="w_a_nome"><label>Nome do ativo</label><input type="text" id="a_nome"><span class="field-error">Campo obrigatório.</span></div>
@@ -429,12 +440,15 @@
 
     const fmt = n => n === null ? '—' : n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
 
+    const qtdVencendo = computeExpiringAssets().length;
+
     document.getElementById('summaryCards').innerHTML = `
       <div class="card"><div class="c-label">Clientes (diagnóstico)</div><div class="c-value">${totalClientes}</div></div>
       <div class="card"><div class="c-label">Já tiveram sessão</div><div class="c-value">${comSessao}</div><div class="c-note">de ${totalClientes} diagnósticos</div></div>
       <div class="card"><div class="c-label">Renda mensal média</div><div class="c-value" style="font-size:19px;">${fmt(mediaRenda)}</div></div>
       <div class="card"><div class="c-label">Investido hoje (média)</div><div class="c-value" style="font-size:19px;">${fmt(mediaInvestido)}</div></div>
       <div class="card"><div class="c-label">Sem reserva de emergência</div><div class="c-value">${totalClientes ? Math.round(semReserva/totalClientes*100) : 0}%</div></div>
+      <div class="card" style="cursor:pointer;" onclick="showVencendoList()"><div class="c-label">Ativos vencendo (5 dias)</div><div class="c-value" style="${qtdVencendo > 0 ? 'color:var(--danger);' : ''}">${qtdVencendo}</div></div>
     `;
 
     renderBars(document.getElementById('objetivoBars'), countBy(individual, 'Objetivo principal'), totalClientes);
@@ -518,6 +532,7 @@
     const ativos = ALL_ATIVOS.filter(a => (a['WhatsApp'] || '').toString() === whats);
     document.getElementById('pieIndexador').innerHTML = buildPieChartSVG(groupSumBy(ativos, 'Indexador'));
     document.getElementById('pieTipo').innerHTML = buildPieChartSVG(groupSumBy(ativos, 'Tipo'));
+    document.getElementById('pieCorretora').innerHTML = buildPieChartSVG(groupSumBy(ativos, 'Corretora'));
   }
 
   // ---------- calendário de vencimentos ----------
@@ -817,6 +832,112 @@
 
   function tryAddAsset(btn) {
     if (validateAssetForm()) addAsset(btn);
+  }
+
+  // ---------- colar informações do ativo ----------
+  function parsePastedAsset(text) {
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+    const map = {};
+    lines.forEach(line => {
+      const idx = line.indexOf(':');
+      if (idx === -1) return;
+      const label = line.slice(0, idx).trim().toLowerCase();
+      const value = line.slice(idx + 1).trim();
+      map[label] = value;
+    });
+
+    function findValue(...keywords) {
+      for (const key in map) {
+        if (keywords.some(kw => key.includes(kw))) return map[key];
+      }
+      return null;
+    }
+    function parsePercent(str) {
+      if (!str) return '';
+      const m = str.match(/(\d+[.,]?\d*)\s*%/);
+      return m ? m[1].replace(',', '.') : '';
+    }
+    function parseDateBR(str) {
+      if (!str) return '';
+      const m = str.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+      if (!m) return '';
+      const [, d, mo, y] = m;
+      return `${y}-${mo.padStart(2,'0')}-${d.padStart(2,'0')}`;
+    }
+    function parseValor(str) {
+      if (!str) return '';
+      let s = str.replace(/[^\d,.-]/g, '');
+      if (s.indexOf(',') !== -1 && s.indexOf('.') !== -1) s = s.replace(/\./g,'').replace(',', '.');
+      else if (s.indexOf(',') !== -1) s = s.replace(',', '.');
+      else s = s.replace(/\./g, '');
+      const n = parseFloat(s);
+      return isNaN(n) ? '' : n;
+    }
+
+    const corretora = findValue('corretora') || '';
+    const nome = findValue('nome') || '';
+    const taxaRaw = findValue('taxa') || '';
+    const taxa = parsePercent(taxaRaw);
+    const vencimento = parseDateBR(findValue('vencimento') || '');
+    const dataInvestimento = parseDateBR(findValue('data de investimento', 'data investimento', 'investimento', 'compra') || '');
+    const fluxoRaw = findValue('fluxo', 'dividendo') || '';
+    const dividendo = fluxoRaw ? (/não|nao|sem/i.test(fluxoRaw) ? 'Não' : 'Sim') : 'Não';
+    const irRaw = map['ir'] || findValue(' ir') || '';
+    const irIsento = /isento/i.test(irRaw) ? 'Sim' : 'Não';
+    const txAdmRaw = findValue('tx adm', 'administra') || '';
+    const txAdm = /não possui|nao possui|sem/i.test(txAdmRaw) ? '0' : (parsePercent(txAdmRaw) || '0');
+    const txPerfRaw = findValue('tx performance', 'performance') || '';
+    const txPerf = /não possui|nao possui|sem/i.test(txPerfRaw) ? '0' : (parsePercent(txPerfRaw) || '0');
+    const fgcRaw = findValue('garantia', 'fgc', 'fcg') || '';
+    const fgc = /^sim/i.test(fgcRaw.trim()) ? 'Sim' : 'Não';
+    const tipo = findValue('tipo') || '';
+    const valor = parseValor(findValue('valor investido', 'valor') || '');
+
+    let indexador = '';
+    if (/ipca/i.test(taxaRaw)) indexador = 'IPCA';
+    else if (/cdi/i.test(taxaRaw)) indexador = 'CDI';
+    else if (/selic/i.test(taxaRaw)) indexador = 'Selic';
+    else if (/pr[ée]fixado/i.test(taxaRaw)) indexador = 'Prefixado';
+
+    return { corretora, nome, indexador, taxa, tipo, dividendo, valor, vencimento, dataInvestimento, fgc, irIsento, txAdm, txPerf };
+  }
+
+  function formatCurrencyFromNumber(num) {
+    const parts = num.toFixed(2).split('.');
+    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    return 'R$ ' + parts.join(',');
+  }
+
+  function setSelectIfMatch(id, value) {
+    const select = document.getElementById(id);
+    const match = Array.from(select.options).find(o => o.value.toLowerCase() === String(value).toLowerCase());
+    if (match) select.value = match.value;
+  }
+
+  function parseAndFillAsset() {
+    const text = document.getElementById('a_paste').value;
+    if (!text.trim()) return;
+    const data = parsePastedAsset(text);
+
+    if (data.corretora) document.getElementById('a_corretora').value = data.corretora;
+    if (data.nome) document.getElementById('a_nome').value = data.nome;
+    if (data.indexador) setSelectIfMatch('a_indexador', data.indexador);
+    if (data.taxa) document.getElementById('a_taxa').value = data.taxa;
+    if (data.tipo) setSelectIfMatch('a_tipo', data.tipo);
+    setSelectIfMatch('a_dividendo', data.dividendo);
+    if (data.valor !== '') document.getElementById('a_valor').value = formatCurrencyFromNumber(data.valor);
+    if (data.vencimento) document.getElementById('a_vencimento').value = data.vencimento;
+    if (data.dataInvestimento) document.getElementById('a_dataInvestimento').value = data.dataInvestimento;
+    setSelectIfMatch('a_fgc', data.fgc);
+    setSelectIfMatch('a_irIsento', data.irIsento);
+    document.getElementById('a_txAdm').value = data.txAdm;
+    document.getElementById('a_txPerformance').value = data.txPerf;
+
+    ['a_corretora','a_nome','a_taxa','a_valor','a_vencimento','a_dataInvestimento'].forEach(id => {
+      document.getElementById('w_' + id)?.classList.remove('invalid');
+    });
+
+    document.getElementById('a_corretora').scrollIntoView({behavior:'smooth', block:'center'});
   }
 
   async function addAsset(btn) {
