@@ -103,6 +103,40 @@
   .form-box { background:var(--ink-2); border:1px solid var(--ink-3); border-radius:14px; padding:20px; margin-top:10px; }
   .form-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(160px,1fr)); gap:12px; }
 
+  .alert-banner {
+    display:none; align-items:center; gap:12px; background:rgba(255,107,87,0.12); border:1px solid var(--danger);
+    border-radius:12px; padding:14px 18px; margin-bottom:22px; cursor:pointer; transition:background .15s ease;
+  }
+  .alert-banner:hover { background:rgba(255,107,87,0.2); }
+  .alert-banner .alert-icon { font-size:20px; }
+  .alert-banner .alert-text { font-size:14px; color:var(--parchment); flex:1; }
+  .alert-banner .alert-text strong { color:var(--danger); }
+  .alert-banner .alert-arrow { color:var(--danger); font-size:18px; }
+
+  .charts-row { display:grid; grid-template-columns:repeat(auto-fit, minmax(280px,1fr)); gap:16px; margin-bottom:22px; }
+  .chart-box { background:var(--ink-2); border:1px solid var(--ink-3); border-radius:14px; padding:16px; }
+  .chart-box .chart-title { font-family:var(--font-mono); font-size:10.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--slate); margin-bottom:10px; }
+  .chart-box svg { width:100%; height:auto; display:block; }
+
+  .cal-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+  .cal-header .cal-month { font-family:var(--font-display); font-size:16px; font-weight:600; }
+  .cal-nav { background:var(--ink-3); border:none; color:var(--parchment); width:30px; height:30px; border-radius:8px; cursor:pointer; font-size:14px; }
+  .cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:4px; margin-bottom:16px; }
+  .cal-dow { text-align:center; font-family:var(--font-mono); font-size:9.5px; color:var(--slate); padding:4px 0; }
+  .cal-day { aspect-ratio:1; display:flex; align-items:center; justify-content:center; border-radius:8px; font-size:12px; background:var(--ink-3); color:var(--parchment); position:relative; }
+  .cal-day.empty { background:transparent; }
+  .cal-day.has-asset { background:var(--danger); color:#fff; font-weight:700; cursor:pointer; }
+  .cal-day.today { border:1px solid var(--brass); }
+  .cal-legend { font-size:12px; color:var(--slate); margin-bottom:6px; }
+  .cal-asset-list { font-size:12.5px; color:var(--parchment); }
+  .cal-asset-list .cal-asset-item { padding:8px 10px; background:var(--ink-3); border-radius:8px; margin-bottom:6px; }
+
+  .vencendo-item { background:var(--ink-2); border:1px solid var(--ink-3); border-left:3px solid var(--danger); border-radius:10px; padding:14px 16px; margin-bottom:10px; cursor:pointer; }
+  .vencendo-item .v-top { display:flex; justify-content:space-between; margin-bottom:4px; }
+  .vencendo-item .v-cliente { font-weight:600; font-family:var(--font-display); font-size:15px; }
+  .vencendo-item .v-dias { font-size:12px; color:var(--danger); font-weight:600; }
+  .vencendo-item .v-detail { font-size:12.5px; color:var(--slate); }
+
   @media (max-width:480px){ .card .c-value{font-size:21px;} }
 </style>
 </head>
@@ -135,6 +169,12 @@
       <div id="panoramaLoading" class="loading">Carregando dados da planilha...</div>
 
       <div id="panoramaContent" style="display:none;">
+        <div class="alert-banner" id="vencendoAlert" onclick="showVencendoList()">
+          <span class="alert-icon">⚠️</span>
+          <span class="alert-text"><strong id="vencendoCount">0</strong> <span id="vencendoLabel">ativos vencendo nos próximos 5 dias</span></span>
+          <span class="alert-arrow">→</span>
+        </div>
+
         <div class="cards" id="summaryCards"></div>
 
         <div class="section-title">Objetivo principal (diagnóstico individual)</div>
@@ -155,6 +195,14 @@
         </div>
       </div>
 
+      <div id="vencendoScreen" style="display:none;">
+        <div class="detail-header">
+          <button class="btn outline small" onclick="backToListFromVencendo()">← Voltar</button>
+          <h2 id="vencendoTitle" style="font-family:var(--font-display); font-size:22px; margin:0;">Ativos vencendo</h2>
+        </div>
+        <div id="vencendoList"></div>
+      </div>
+
       <div id="clientDetail">
         <div class="detail-header">
           <button class="btn outline small" onclick="backToList()">← Voltar</button>
@@ -168,6 +216,28 @@
         <div class="info-grid" id="detailSessao"></div>
 
         <div class="section-title">Ativos da carteira</div>
+        <div class="charts-row">
+          <div class="chart-box">
+            <div class="chart-title">Por indexador</div>
+            <div id="pieIndexador"></div>
+          </div>
+          <div class="chart-box">
+            <div class="chart-title">Por tipo</div>
+            <div id="pieTipo"></div>
+          </div>
+        </div>
+
+        <div class="chart-box" style="margin-bottom:22px;">
+          <div class="chart-title">Calendário de vencimentos</div>
+          <div class="cal-header">
+            <button class="cal-nav" onclick="calNav(-1)">‹</button>
+            <span class="cal-month" id="calMonthLabel"></span>
+            <button class="cal-nav" onclick="calNav(1)">›</button>
+          </div>
+          <div class="cal-grid" id="calGrid"></div>
+          <div id="calAssetList"></div>
+        </div>
+
         <div id="assetsList"></div>
 
         <div class="form-box">
@@ -183,7 +253,7 @@
               <span class="field-error">Campo obrigatório.</span>
             </div>
             <div class="field" id="w_a_tipo"><label>Tipo</label>
-              <select id="a_tipo"><option>Fixa</option><option>Variável</option><option>Híbrida</option></select>
+              <select id="a_tipo"><option>Fixa</option><option>Variável</option><option>Híbrida</option><option>Cripto</option></select>
             </div>
             <div class="field" id="w_a_dividendo"><label>Paga dividendo?</label><select id="a_dividendo"><option>Não</option><option>Sim</option></select></div>
             <div class="field" id="w_a_valor"><label>Valor investido (R$)</label><input type="text" id="a_valor" inputmode="numeric" placeholder="R$ 0,00"><span class="field-error">Campo obrigatório.</span></div>
@@ -330,6 +400,7 @@
       ]);
       ALL_INDIVIDUAL = individual; ALL_SESSOES = sessoes; ALL_ATIVOS = ativos;
       renderPanoramaList();
+      updateVencendoAlert();
       document.getElementById('panoramaLoading').style.display = 'none';
       document.getElementById('panoramaContent').style.display = 'block';
     } catch (err) {
@@ -388,6 +459,198 @@
     return `<div class="info-item"><div class="i-label">${label}</div><div class="i-value">${value || '—'}</div></div>`;
   }
 
+  // ---------- gráficos de pizza ----------
+  function buildPieChartSVG(data) {
+    const total = data.reduce((s, d) => s + d.value, 0);
+    const colors = ['#00e676', '#2dd4bf', '#fbbf24', '#f472b6', '#818cf8', '#fb7185', '#60a5fa'];
+    const cx = 100, cy = 110, r = 85;
+    let angleStart = -90;
+    let svg = `<svg viewBox="0 0 340 220" xmlns="http://www.w3.org/2000/svg" font-family="Arial, sans-serif">`;
+
+    if (total === 0) {
+      svg += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="#202020" />`;
+      svg += `<text x="${cx}" y="${cy}" text-anchor="middle" fill="#9a9a9a" font-size="12">Sem ativos</text>`;
+      svg += `</svg>`;
+      return svg;
+    }
+
+    data.forEach((d, i) => {
+      const pct = d.value / total;
+      const angleEnd = angleStart + pct * 360;
+      const largeArc = (angleEnd - angleStart) > 180 ? 1 : 0;
+      const x1 = cx + r * Math.cos(angleStart * Math.PI / 180);
+      const y1 = cy + r * Math.sin(angleStart * Math.PI / 180);
+      const x2 = cx + r * Math.cos(angleEnd * Math.PI / 180);
+      const y2 = cy + r * Math.sin(angleEnd * Math.PI / 180);
+      const color = colors[i % colors.length];
+      if (data.length === 1) {
+        svg += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${color}" />`;
+      } else {
+        svg += `<path d="M ${cx} ${cy} L ${x1.toFixed(2)} ${y1.toFixed(2)} A ${r} ${r} 0 ${largeArc} 1 ${x2.toFixed(2)} ${y2.toFixed(2)} Z" fill="${color}" stroke="#141414" stroke-width="2"/>`;
+      }
+      angleStart = angleEnd;
+    });
+
+    let legendY = 20;
+    data.forEach((d, i) => {
+      const pct = ((d.value / total) * 100).toFixed(1);
+      const color = colors[i % colors.length];
+      svg += `<rect x="215" y="${legendY}" width="11" height="11" rx="2" fill="${color}"/>`;
+      svg += `<text x="232" y="${legendY + 9.5}" font-size="10.5" fill="#f2f2f2">${d.label} — ${pct}%</text>`;
+      legendY += 20;
+    });
+
+    svg += `</svg>`;
+    return svg;
+  }
+
+  function groupSumBy(ativos, key) {
+    const sums = {};
+    ativos.forEach(a => {
+      const k = a[key] || '—';
+      const v = parseCurrency(a['Valor investido']) || 0;
+      sums[k] = (sums[k] || 0) + v;
+    });
+    return Object.entries(sums).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
+  }
+
+  function renderClientCharts(whats) {
+    const ativos = ALL_ATIVOS.filter(a => (a['WhatsApp'] || '').toString() === whats);
+    document.getElementById('pieIndexador').innerHTML = buildPieChartSVG(groupSumBy(ativos, 'Indexador'));
+    document.getElementById('pieTipo').innerHTML = buildPieChartSVG(groupSumBy(ativos, 'Tipo'));
+  }
+
+  // ---------- calendário de vencimentos ----------
+  let calMonthOffset = 0;
+
+  function renderCalendar(whats) {
+    const ativos = ALL_ATIVOS.filter(a => (a['WhatsApp'] || '').toString() === whats);
+    const base = new Date();
+    const viewDate = new Date(base.getFullYear(), base.getMonth() + calMonthOffset, 1);
+    const year = viewDate.getFullYear(), month = viewDate.getMonth();
+
+    const monthNames = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+    document.getElementById('calMonthLabel').textContent = `${monthNames[month]} ${year}`;
+
+    const firstDow = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+    const dayMap = {};
+    ativos.forEach(a => {
+      const d = new Date(a['Vencimento']);
+      if (!isNaN(d.getTime()) && d.getFullYear() === year && d.getMonth() === month) {
+        const day = d.getDate();
+        if (!dayMap[day]) dayMap[day] = [];
+        dayMap[day].push(a);
+      }
+    });
+
+    const grid = document.getElementById('calGrid');
+    grid.innerHTML = '';
+    ['D','S','T','Q','Q','S','S'].forEach(d => {
+      const el = document.createElement('div');
+      el.className = 'cal-dow';
+      el.textContent = d;
+      grid.appendChild(el);
+    });
+    for (let i = 0; i < firstDow; i++) {
+      const el = document.createElement('div');
+      el.className = 'cal-day empty';
+      grid.appendChild(el);
+    }
+    const today = new Date();
+    for (let day = 1; day <= daysInMonth; day++) {
+      const el = document.createElement('div');
+      el.className = 'cal-day';
+      if (dayMap[day]) el.classList.add('has-asset');
+      if (today.getFullYear() === year && today.getMonth() === month && today.getDate() === day) el.classList.add('today');
+      el.textContent = day;
+      if (dayMap[day]) el.onclick = () => showCalDayAssets(dayMap[day]);
+      grid.appendChild(el);
+    }
+    document.getElementById('calAssetList').innerHTML = '';
+  }
+
+  function showCalDayAssets(assets) {
+    document.getElementById('calAssetList').innerHTML =
+      '<div class="cal-legend">Vencendo nesse dia:</div>' +
+      assets.map(a => `<div class="cal-asset-item">${a['Nome do ativo'] || '—'} — ${a['Corretora'] || '—'}</div>`).join('');
+  }
+
+  function calNav(delta) {
+    calMonthOffset += delta;
+    renderCalendar(currentClientWhats);
+  }
+
+  // ---------- alerta de vencimento (painel principal) ----------
+  function daysUntil(dateStr) {
+    if (!dateStr) return null;
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return null;
+    const today = new Date();
+    const d0 = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    const t0 = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    return Math.round((d0 - t0) / (1000 * 60 * 60 * 24));
+  }
+
+  function computeExpiringAssets() {
+    const results = [];
+    ALL_ATIVOS.forEach(a => {
+      const dias = daysUntil(a['Vencimento']);
+      if (dias !== null && dias >= 0 && dias <= 5) {
+        const whats = (a['WhatsApp'] || '').toString();
+        const cliente = ALL_INDIVIDUAL.find(c => (c['WhatsApp'] || '').toString() === whats);
+        results.push({ asset: a, dias, whats, clienteNome: cliente ? cliente['Nome'] : (whats || 'Cliente desconhecido') });
+      }
+    });
+    results.sort((a, b) => a.dias - b.dias);
+    return results;
+  }
+
+  function updateVencendoAlert() {
+    const list = computeExpiringAssets();
+    const banner = document.getElementById('vencendoAlert');
+    if (list.length > 0) {
+      banner.style.display = 'flex';
+      document.getElementById('vencendoCount').textContent = list.length;
+      document.getElementById('vencendoLabel').textContent = list.length === 1 ? 'ativo vencendo nos próximos 5 dias' : 'ativos vencendo nos próximos 5 dias';
+    } else {
+      banner.style.display = 'none';
+    }
+  }
+
+  function showVencendoList() {
+    const list = computeExpiringAssets();
+    const container = document.getElementById('vencendoList');
+    container.innerHTML = '';
+    if (list.length === 0) {
+      container.innerHTML = '<p style="color:var(--slate); font-size:13px;">Nenhum ativo vencendo nos próximos 5 dias.</p>';
+    } else {
+      list.forEach(item => {
+        const urgencia = item.dias === 0 ? 'Vence hoje' : item.dias === 1 ? 'Vence amanhã' : `Vence em ${item.dias} dias`;
+        const vencDate = new Date(item.asset['Vencimento']);
+        const vencStr = isNaN(vencDate.getTime()) ? '—' : vencDate.toLocaleDateString('pt-BR');
+        const div = document.createElement('div');
+        div.className = 'vencendo-item';
+        div.onclick = () => {
+          document.getElementById('vencendoScreen').style.display = 'none';
+          openClientDetail(item.whats);
+        };
+        div.innerHTML = `<div class="v-top"><span class="v-cliente">${item.clienteNome}</span><span class="v-dias">${urgencia}</span></div><div class="v-detail">${item.asset['Nome do ativo'] || '—'} · vence em ${vencStr}</div>`;
+        container.appendChild(div);
+      });
+    }
+    document.getElementById('panoramaContent').style.display = 'none';
+    document.getElementById('clientDetail').style.display = 'none';
+    document.getElementById('vencendoScreen').style.display = 'block';
+    window.scrollTo(0, 0);
+  }
+
+  function backToListFromVencendo() {
+    document.getElementById('vencendoScreen').style.display = 'none';
+    document.getElementById('panoramaContent').style.display = 'block';
+  }
+
   function openClientDetail(whats) {
     currentClientWhats = whats;
     const cliente = ALL_INDIVIDUAL.find(r => (r['WhatsApp'] || '').toString() === whats);
@@ -408,8 +671,12 @@
     }
 
     renderAssets(whats);
+    renderClientCharts(whats);
+    calMonthOffset = 0;
+    renderCalendar(whats);
 
     document.getElementById('panoramaContent').style.display = 'none';
+    document.getElementById('vencendoScreen').style.display = 'none';
     document.getElementById('clientDetail').style.display = 'block';
     window.scrollTo(0, 0);
   }
@@ -514,6 +781,9 @@
       const globalIdx = ALL_ATIVOS.indexOf(asset);
       if (globalIdx !== -1) ALL_ATIVOS.splice(globalIdx, 1);
       renderAssets(currentClientWhats);
+      renderClientCharts(currentClientWhats);
+      renderCalendar(currentClientWhats);
+      updateVencendoAlert();
     } catch (err) {
       alert('Não consegui excluir na planilha.\n\nDetalhe: ' + err.message);
       console.error(err);
@@ -588,6 +858,9 @@
 
       ALL_ATIVOS.push(payload);
       renderAssets(currentClientWhats);
+      renderClientCharts(currentClientWhats);
+      renderCalendar(currentClientWhats);
+      updateVencendoAlert();
       ['a_corretora','a_nome','a_taxa','a_valor','a_dataInvestimento','a_vencimento','a_txAdm','a_txPerformance'].forEach(id => document.getElementById(id).value = '');
       document.getElementById('a_txAdm').value = '0';
       document.getElementById('a_txPerformance').value = '0';
