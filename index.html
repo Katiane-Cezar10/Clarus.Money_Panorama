@@ -104,6 +104,11 @@
 
   .assets-toolbar { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:14px; flex-wrap:wrap; }
   .filter-select { background:var(--ink-3); border:1px solid transparent; color:var(--parchment); font-size:13px; padding:9px 12px; border-radius:8px; outline:none; }
+
+  .indexer-box { background:var(--ink-2); border:1px solid var(--brass-soft); border-radius:14px; padding:16px 18px; margin-bottom:20px; }
+  .indexer-title { font-size:12px; color:var(--slate); margin-bottom:12px; line-height:1.4; }
+  .indexer-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(140px,1fr)); gap:12px; }
+  .indexer-grid .field { margin-bottom:0; }
   .asset-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(130px,1fr)); gap:8px 16px; font-size:12.5px; }
   .asset-grid .a-item .a-label { color:var(--slate); font-size:10px; text-transform:uppercase; letter-spacing:.04em; }
   .asset-grid .a-item .a-value { color:var(--parchment); }
@@ -182,6 +187,18 @@
       <div id="panoramaLoading" class="loading">Carregando dados da planilha...</div>
 
       <div id="panoramaContent" style="display:none;">
+        <div class="indexer-box">
+          <div class="indexer-title">Indicadores atuais, usados pra calcular ativos com taxa híbrida ou % do indexador. Cada atualização fica guardada no histórico, então a rentabilidade de cada ativo é calculada juntando a taxa real de cada período, não uma taxa única fixa.</div>
+          <div class="indexer-grid">
+            <div class="field"><label>CDI (% a.a.)</label><input type="number" id="idx_cdi" step="0.01"></div>
+            <div class="field"><label>IPCA (% a.a.)</label><input type="number" id="idx_ipca" step="0.01"></div>
+            <div class="field"><label>Selic (% a.a.)</label><input type="number" id="idx_selic" step="0.01"></div>
+            <div class="field"><label>Data de vigência</label><input type="date" id="idx_data"></div>
+          </div>
+          <button class="btn ghost small" onclick="saveIndexerHistory(this)">Salvar e registrar no histórico</button>
+          <div id="idxHistoryPreview" style="margin-top:12px; font-size:11.5px; color:var(--slate);"></div>
+        </div>
+
         <div class="alert-banner" id="vencendoAlert" onclick="showVencendoList()">
           <span class="alert-icon">⚠️</span>
           <span class="alert-text"><strong id="vencendoCount">0</strong> <span id="vencendoLabel">ativos vencendo nos próximos 5 dias</span></span>
@@ -284,9 +301,17 @@
             <div class="field" id="w_a_indexador"><label>Indexador</label>
               <select id="a_indexador"><option>IPCA</option><option>Selic</option><option>CDI</option><option>Prefixado</option><option>Outro</option></select>
             </div>
-            <div class="field" id="w_a_taxa"><label>Taxa prevista (% ao ano)</label>
+            <div class="field" id="w_a_modoTaxa"><label>Como a taxa é calculada?</label>
+              <select id="a_modoTaxa" onchange="updateTaxaHint()">
+                <option value="fixa">Taxa fixa ao ano</option>
+                <option value="spread">Indexador + spread (ex: CDI + 10%)</option>
+                <option value="percentual">% do indexador (ex: 113% do CDI)</option>
+              </select>
+            </div>
+            <div class="field" id="w_a_taxa"><label id="a_taxaLabel">Taxa prevista (% ao ano)</label>
               <div class="input-suffix"><input type="number" id="a_taxa" step="0.01"><span class="suffix">%</span></div>
               <span class="field-error">Campo obrigatório.</span>
+              <small id="a_taxaHint" style="display:block; color:var(--slate); font-size:11px; margin-top:5px;">Digite a taxa anual direta, ex: 12.5 para 12,5% ao ano.</small>
             </div>
             <div class="field" id="w_a_tipo"><label>Tipo</label>
               <select id="a_tipo"><option>Fixa</option><option>Variável</option><option>Híbrida</option><option>Cripto</option></select>
@@ -347,7 +372,7 @@
   const SHEETS_READ_KEY = "KiJugMU2mikFvriyThPaFrie";
   const SHEETS_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbw5wWAe1SvZSLk0Njk_4HttMD-52kptN8UhoklDnz5lvRubHC-ySLAOvzixhQ47PXU5/exec";
 
-  let ALL_INDIVIDUAL = [], ALL_SESSOES = [], ALL_ATIVOS = [];
+  let ALL_INDIVIDUAL = [], ALL_SESSOES = [], ALL_ATIVOS = [], ALL_HISTORICO = [];
   let currentClientWhats = null;
   let editingAssetRef = null;
 
@@ -378,10 +403,157 @@
     if (pass === ADMIN_PASSWORD) {
       document.getElementById('loginScreen').style.display = 'none';
       document.getElementById('app').style.display = 'block';
+      loadIndexers();
       loadPanorama();
       simular();
     } else {
       document.getElementById('loginErr').style.display = 'block';
+    }
+  }
+
+  function loadIndexers() {
+    document.getElementById('idx_cdi').value = localStorage.getItem('idx_cdi') || '10.75';
+    document.getElementById('idx_ipca').value = localStorage.getItem('idx_ipca') || '4.5';
+    document.getElementById('idx_selic').value = localStorage.getItem('idx_selic') || '10.75';
+    document.getElementById('idx_data').value = new Date().toISOString().split('T')[0];
+  }
+
+  async function saveIndexerHistory(btn) {
+    const cdi = document.getElementById('idx_cdi').value || '0';
+    const ipca = document.getElementById('idx_ipca').value || '0';
+    const selic = document.getElementById('idx_selic').value || '0';
+    const data = document.getElementById('idx_data').value || new Date().toISOString().split('T')[0];
+
+    localStorage.setItem('idx_cdi', cdi);
+    localStorage.setItem('idx_ipca', ipca);
+    localStorage.setItem('idx_selic', selic);
+
+    const original = btn.textContent;
+    btn.textContent = 'Salvando...';
+    btn.disabled = true;
+    try {
+      await Promise.all([
+        saveToSheets({ _tipo: 'historico_indexadores', 'Data': data, 'Indexador': 'CDI', 'Taxa': cdi }),
+        saveToSheets({ _tipo: 'historico_indexadores', 'Data': data, 'Indexador': 'IPCA', 'Taxa': ipca }),
+        saveToSheets({ _tipo: 'historico_indexadores', 'Data': data, 'Indexador': 'Selic', 'Taxa': selic })
+      ]);
+      ALL_HISTORICO.push(
+        { 'Data': data, 'Indexador': 'CDI', 'Taxa': cdi },
+        { 'Data': data, 'Indexador': 'IPCA', 'Taxa': ipca },
+        { 'Data': data, 'Indexador': 'Selic', 'Taxa': selic }
+      );
+      renderIndexHistoryPreview();
+      if (currentClientWhats) {
+        renderAssets(currentClientWhats);
+        renderClientSummary(currentClientWhats);
+      }
+      btn.textContent = 'Salvo ✓';
+      setTimeout(() => { btn.textContent = original; }, 1800);
+    } catch (err) {
+      alert('Não consegui salvar o histórico na planilha.\n\nDetalhe: ' + err.message);
+      console.error(err);
+      btn.textContent = original;
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  function renderIndexHistoryPreview() {
+    const el = document.getElementById('idxHistoryPreview');
+    if (!el) return;
+    const count = ALL_HISTORICO.length;
+    if (count === 0) { el.textContent = 'Nenhum registro histórico ainda.'; return; }
+    const ultimos = ALL_HISTORICO.slice(-3).reverse();
+    el.textContent = `${count} registros no histórico. Últimos: ` + ultimos.map(h => `${h['Indexador']} ${h['Taxa']}% (${h['Data']})`).join(' · ');
+  }
+
+  function getIndexerValue(indexador) {
+    const key = { 'CDI': 'idx_cdi', 'IPCA': 'idx_ipca', 'Selic': 'idx_selic' }[indexador];
+    if (!key) return 0;
+    return parseFloat(localStorage.getItem(key)) || 0;
+  }
+
+  function computeRealTaxa(a) {
+    const modo = a['Modo da taxa'] || 'fixa';
+    const taxaVal = parseFloat(a['Taxa prevista (% a.a.)']) || 0;
+    if (modo === 'fixa') return taxaVal;
+    const idxVal = getIndexerValue(a['Indexador']);
+    if (modo === 'spread') return idxVal + taxaVal;
+    if (modo === 'percentual') return idxVal * (taxaVal / 100);
+    return taxaVal;
+  }
+
+  function buildRateSegments(indexador, startDate, endDate, todayDate) {
+    const history = ALL_HISTORICO
+      .filter(h => h['Indexador'] === indexador)
+      .map(h => ({ date: new Date(h['Data']), taxa: parseFloat(h['Taxa']) || 0 }))
+      .filter(h => !isNaN(h.date.getTime()))
+      .sort((a, b) => a.date - b.date);
+
+    const segments = [];
+    const currentValue = getIndexerValue(indexador);
+
+    const pastEnd = endDate < todayDate ? endDate : todayDate;
+    if (startDate < pastEnd) {
+      let boundaries = [startDate];
+      history.forEach(h => { if (h.date > startDate && h.date < pastEnd) boundaries.push(h.date); });
+      boundaries.push(pastEnd);
+      boundaries = [...new Set(boundaries.map(d => d.getTime()))].sort((a, b) => a - b).map(t => new Date(t));
+
+      for (let i = 0; i < boundaries.length - 1; i++) {
+        const segStart = boundaries[i], segEnd = boundaries[i + 1];
+        let taxaBase = null;
+        for (const h of history) { if (h.date <= segStart) taxaBase = h.taxa; else break; }
+        if (taxaBase === null) taxaBase = history.length ? history[0].taxa : currentValue;
+        segments.push({ start: segStart, end: segEnd, taxaBase });
+      }
+    }
+    const futureStart = startDate > todayDate ? startDate : todayDate;
+    if (futureStart < endDate) segments.push({ start: futureStart, end: endDate, taxaBase: currentValue });
+    return segments;
+  }
+
+  function computeGrowthFactor(a) {
+    const modo = a['Modo da taxa'] || 'fixa';
+    const taxaVal = parseFloat(a['Taxa prevista (% a.a.)']) || 0;
+    const txAdm = parseFloat(a['Tx administração (% a.a.)']) || 0;
+    const dataInv = new Date(a['Data de investimento']);
+    const dataVenc = new Date(a['Vencimento']);
+
+    if (isNaN(dataInv.getTime()) || isNaN(dataVenc.getTime()) || dataVenc <= dataInv) return 1;
+
+    if (modo === 'fixa') {
+      const anos = (dataVenc - dataInv) / (1000 * 60 * 60 * 24 * 365.25);
+      const rateLiquida = Math.max(0, taxaVal - txAdm);
+      return Math.pow(1 + rateLiquida / 100, anos);
+    }
+
+    const today = new Date();
+    const segments = buildRateSegments(a['Indexador'], dataInv, dataVenc, today);
+    let factor = 1;
+    segments.forEach(seg => {
+      const dias = (seg.end - seg.start) / (1000 * 60 * 60 * 24);
+      if (dias <= 0) return;
+      let effRate = modo === 'spread' ? seg.taxaBase + taxaVal : seg.taxaBase * (taxaVal / 100);
+      effRate = Math.max(0, effRate - txAdm);
+      factor *= Math.pow(1 + effRate / 100, dias / 365.25);
+    });
+    return factor;
+  }
+
+  function updateTaxaHint() {
+    const modo = document.getElementById('a_modoTaxa').value;
+    const label = document.getElementById('a_taxaLabel');
+    const hint = document.getElementById('a_taxaHint');
+    if (modo === 'fixa') {
+      label.textContent = 'Taxa prevista (% ao ano)';
+      hint.textContent = 'Digite a taxa anual direta, ex: 12.5 para 12,5% ao ano.';
+    } else if (modo === 'spread') {
+      label.textContent = 'Spread sobre o indexador (% ao ano)';
+      hint.textContent = 'Digite só o adicional, ex: 10 para "indexador + 10%". Escolha o indexador certo acima.';
+    } else if (modo === 'percentual') {
+      label.textContent = 'Percentual do indexador (%)';
+      hint.textContent = 'Digite o percentual, ex: 113 para "113% do indexador". Escolha o indexador certo acima.';
     }
   }
   document.getElementById('loginPass').addEventListener('keydown', e => { if (e.key === 'Enter') tryLogin(); });
@@ -437,14 +609,16 @@
 
   async function loadPanorama() {
     try {
-      const [individual, sessoes, ativos] = await Promise.all([
+      const [individual, sessoes, ativos, historico] = await Promise.all([
         fetchSheet('diagnostico_individual'),
         fetchSheet('sessao_conjunta'),
-        fetchSheet('ativos_cliente')
+        fetchSheet('ativos_cliente'),
+        fetchSheet('historico_indexadores')
       ]);
-      ALL_INDIVIDUAL = individual; ALL_SESSOES = sessoes; ALL_ATIVOS = ativos;
+      ALL_INDIVIDUAL = individual; ALL_SESSOES = sessoes; ALL_ATIVOS = ativos; ALL_HISTORICO = historico;
       renderPanoramaList();
       updateVencendoAlert();
+      renderIndexHistoryPreview();
       document.getElementById('panoramaLoading').style.display = 'none';
       document.getElementById('panoramaContent').style.display = 'block';
     } catch (err) {
@@ -781,12 +955,10 @@
     const dataVenc = new Date(a['Vencimento']);
     const dias = Math.max(0, (dataVenc - dataInv) / (1000 * 60 * 60 * 24));
     const anos = dias / 365.25;
-    const taxaBruta = parseFloat(a['Taxa prevista (% a.a.)']) || 0;
-    const txAdm = parseFloat(a['Tx administração (% a.a.)']) || 0;
     const txPerf = parseFloat(a['Tx performance (%)']) || 0;
 
-    const taxaLiquidaAdm = Math.max(0, taxaBruta - txAdm);
-    const valorBruto = valor * Math.pow(1 + taxaLiquidaAdm / 100, anos);
+    const factor = computeGrowthFactor(a);
+    const valorBruto = valor * factor;
     let rendimento = Math.max(0, valorBruto - valor);
     rendimento = rendimento * (1 - txPerf / 100);
 
@@ -855,9 +1027,19 @@
       <div class="card"><div class="c-label">Total investido</div><div class="c-value" style="font-size:19px;">${fmt(totalInvestido)}</div></div>
       <div class="card"><div class="c-label">Rentabilidade bruta prevista</div><div class="c-value" style="font-size:19px;">${fmt(brutoTotal)}</div></div>
       <div class="card"><div class="c-label">Rentabilidade líquida prevista</div><div class="c-value" style="font-size:19px;">${fmt(liquidoTotal)}</div></div>
+      <div class="card"><div class="c-label">Patrimônio total previsto</div><div class="c-value" style="font-size:19px; color:var(--brass);">${fmt(totalInvestido + liquidoTotal)}</div></div>
       <div class="card"><div class="c-label">Dividendos por mês (estimado)</div><div class="c-value" style="font-size:19px;">${fmt(dividendoMes)}</div></div>
       <div class="card"><div class="c-label">Total dividendos até vencimento</div><div class="c-value" style="font-size:19px;">${fmt(dividendoTotalAteVencimento)}</div></div>
     `;
+  }
+
+  function taxaDisplay(a) {
+    const modo = a['Modo da taxa'] || 'fixa';
+    const taxaVal = a['Taxa prevista (% a.a.)'] || '0';
+    const efetiva = computeRealTaxa(a).toFixed(2);
+    if (modo === 'spread') return `${a['Indexador'] || '—'} + ${taxaVal}% <span style="color:var(--slate); font-size:11px;">(hoje: ${efetiva}% a.a.)</span>`;
+    if (modo === 'percentual') return `${taxaVal}% do ${a['Indexador'] || '—'} <span style="color:var(--slate); font-size:11px;">(hoje: ${efetiva}% a.a.)</span>`;
+    return `${taxaVal}% a.a.`;
   }
 
   function renderAssets(whats) {
@@ -911,7 +1093,7 @@
         <div class="asset-grid">
           <div class="a-item"><div class="a-label">Indexador</div><div class="a-value">${a['Indexador'] || '—'}</div></div>
           <div class="a-item"><div class="a-label">Tipo</div><div class="a-value">${a['Tipo'] || '—'}</div></div>
-          <div class="a-item"><div class="a-label">Taxa prevista</div><div class="a-value">${a['Taxa prevista (% a.a.)'] || '—'}% a.a.</div></div>
+          <div class="a-item"><div class="a-label">Taxa prevista</div><div class="a-value">${taxaDisplay(a)}</div></div>
           <div class="a-item"><div class="a-label">Valor investido</div><div class="a-value">${valorFmt}</div></div>
           <div class="a-item"><div class="a-label">Vencimento</div><div class="a-value">${fmtDate(a['Vencimento'])}</div></div>
           <div class="a-item"><div class="a-label">FGC</div><div class="a-value">${a['Garantia FGC'] || '—'}</div></div>
@@ -1000,6 +1182,7 @@
       'Corretora': document.getElementById('a_corretora').value.trim(),
       'Nome do ativo': document.getElementById('a_nome').value.trim(),
       'Indexador': document.getElementById('a_indexador').value,
+      'Modo da taxa': document.getElementById('a_modoTaxa').value,
       'Taxa prevista (% a.a.)': document.getElementById('a_taxa').value,
       'Tipo': document.getElementById('a_tipo').value,
       'Paga dividendo': document.getElementById('a_dividendo').value,
@@ -1022,6 +1205,8 @@
     document.getElementById('a_txAdm').value = '0';
     document.getElementById('a_txPerformance').value = '0';
     document.getElementById('a_indexador').selectedIndex = 0;
+    document.getElementById('a_modoTaxa').selectedIndex = 0;
+    updateTaxaHint();
     document.getElementById('a_tipo').selectedIndex = 0;
     document.getElementById('a_dividendo').selectedIndex = 0;
     document.getElementById('a_fgc').selectedIndex = 0;
@@ -1038,6 +1223,8 @@
     document.getElementById('a_corretora').value = asset['Corretora'] || '';
     document.getElementById('a_nome').value = asset['Nome do ativo'] || '';
     setSelectIfMatch('a_indexador', asset['Indexador'] || '');
+    setSelectIfMatch('a_modoTaxa', asset['Modo da taxa'] || 'fixa');
+    updateTaxaHint();
     document.getElementById('a_taxa').value = asset['Taxa prevista (% a.a.)'] || '';
     setSelectIfMatch('a_tipo', asset['Tipo'] || '');
     setSelectIfMatch('a_dividendo', asset['Paga dividendo'] || 'Não');
@@ -1117,7 +1304,18 @@
     const corretora = findValue('corretora') || '';
     const nome = findValue('nome') || '';
     const taxaRaw = findValue('taxa') || '';
-    const taxa = parsePercent(taxaRaw);
+
+    let modoTaxa = 'fixa', taxa = parsePercent(taxaRaw);
+    const hibrido = (() => {
+      const raw = taxaRaw.toLowerCase();
+      let m = raw.match(/(cdi|ipca|selic)\s*\+\s*(\d+[.,]?\d*)\s*%?/);
+      if (m) return { modo: 'spread', valor: m[2].replace(',', '.') };
+      m = raw.match(/(\d+[.,]?\d*)\s*%\s*(?:do|da)?\s*(cdi|ipca|selic)/);
+      if (m) return { modo: 'percentual', valor: m[1].replace(',', '.') };
+      return null;
+    })();
+    if (hibrido) { modoTaxa = hibrido.modo; taxa = hibrido.valor; }
+
     const vencimento = parseDateBR(findValue('vencimento') || '');
     const dataInvestimento = parseDateBR(findValue('data de investimento', 'data investimento', 'investimento', 'compra') || '');
     const fluxoRaw = findValue('fluxo', 'dividendo') || '';
@@ -1139,7 +1337,7 @@
     else if (/selic/i.test(taxaRaw)) indexador = 'Selic';
     else if (/pr[ée]fixado/i.test(taxaRaw)) indexador = 'Prefixado';
 
-    return { corretora, nome, indexador, taxa, tipo, dividendo, valor, vencimento, dataInvestimento, fgc, irIsento, txAdm, txPerf };
+    return { corretora, nome, indexador, modoTaxa, taxa, tipo, dividendo, valor, vencimento, dataInvestimento, fgc, irIsento, txAdm, txPerf };
   }
 
   function formatCurrencyFromNumber(num) {
@@ -1162,6 +1360,8 @@
     if (data.corretora) document.getElementById('a_corretora').value = data.corretora;
     if (data.nome) document.getElementById('a_nome').value = data.nome;
     if (data.indexador) setSelectIfMatch('a_indexador', data.indexador);
+    setSelectIfMatch('a_modoTaxa', data.modoTaxa || 'fixa');
+    updateTaxaHint();
     if (data.taxa) document.getElementById('a_taxa').value = data.taxa;
     if (data.tipo) setSelectIfMatch('a_tipo', data.tipo);
     setSelectIfMatch('a_dividendo', data.dividendo);
