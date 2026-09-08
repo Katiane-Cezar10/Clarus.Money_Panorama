@@ -119,6 +119,9 @@
   .chart-box svg { width:100%; height:auto; display:block; }
 
   .cal-box { max-width: 100%; }
+  .cal-toggle { display:flex; gap:4px; margin-bottom:8px; }
+  .cal-toggle-btn { flex:1; background:var(--ink-3); border:1px solid transparent; color:var(--slate); font-size:9px; padding:5px 4px; border-radius:6px; cursor:pointer; }
+  .cal-toggle-btn.selected { border-color:var(--brass); color:var(--brass); font-weight:600; }
   .cal-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
   .cal-header .cal-month { font-family:var(--font-display); font-size:12.5px; font-weight:600; }
   .cal-nav { background:var(--ink-3); border:none; color:var(--parchment); width:20px; height:20px; border-radius:5px; cursor:pointer; font-size:11px; line-height:1; padding:0; }
@@ -231,7 +234,11 @@
             <div id="pieCorretora"></div>
           </div>
           <div class="chart-box cal-box">
-            <div class="chart-title">Vencimentos</div>
+            <div class="chart-title" id="calTitle">Vencimentos</div>
+            <div class="cal-toggle">
+              <button class="cal-toggle-btn selected" id="calToggleVenc" onclick="switchCalMode('vencimento')">Vencimento</button>
+              <button class="cal-toggle-btn" id="calToggleDiv" onclick="switchCalMode('dividendo')">Dividendo</button>
+            </div>
             <div class="cal-header">
               <button class="cal-nav" onclick="calNav(-1)">‹</button>
               <span class="cal-month" id="calMonthLabel"></span>
@@ -278,8 +285,12 @@
             <div class="field" id="w_a_txPerformance"><label>Tx performance (% sobre o lucro)</label>
               <div class="input-suffix"><input type="number" id="a_txPerformance" step="0.01" value="0"><span class="suffix">%</span></div>
             </div>
+            <div class="field" id="w_a_dataDividendo"><label>Próxima data de dividendo (se pagar)</label><input type="date" id="a_dataDividendo"></div>
+            <div class="field" id="w_a_valorDividendo"><label>Valor previsto do dividendo (R$)</label><input type="text" id="a_valorDividendo" inputmode="numeric" placeholder="R$ 0,00"></div>
           </div>
-          <button class="btn" style="margin-top:8px;" onclick="tryAddAsset(this)">Adicionar ativo</button>
+          <div class="field"><label>Observação (opcional)</label><textarea id="a_observacao" rows="2" placeholder="Qualquer anotação livre sobre esse ativo"></textarea></div>
+          <button class="btn" style="margin-top:8px;" id="assetSubmitBtn" onclick="tryAddAsset(this)">Adicionar ativo</button>
+          <button class="btn ghost" style="display:none;" id="assetCancelBtn" onclick="cancelAssetEdit()">Cancelar edição</button>
         </div>
       </div>
     </div>
@@ -317,6 +328,7 @@
 
   let ALL_INDIVIDUAL = [], ALL_SESSOES = [], ALL_ATIVOS = [];
   let currentClientWhats = null;
+  let editingAssetRef = null;
 
   function attachCurrencyMask(id) {
     const input = document.getElementById(id);
@@ -331,7 +343,7 @@
       if (wrap) wrap.classList.remove('invalid');
     });
   }
-  ['sim_atual', 'sim_aporte', 'a_valor'].forEach(attachCurrencyMask);
+  ['sim_atual', 'sim_aporte', 'a_valor', 'a_valorDividendo'].forEach(attachCurrencyMask);
   document.getElementById('sim_aporte').value = 'R$ 300,00';
 
   function parseCurrencyValue(str) {
@@ -441,6 +453,7 @@
     const fmt = n => n === null ? '—' : n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
 
     const qtdVencendo = computeExpiringAssets().length;
+    const qtdDividendo = computeUpcomingDividends().length;
 
     document.getElementById('summaryCards').innerHTML = `
       <div class="card"><div class="c-label">Clientes (diagnóstico)</div><div class="c-value">${totalClientes}</div></div>
@@ -449,6 +462,7 @@
       <div class="card"><div class="c-label">Investido hoje (média)</div><div class="c-value" style="font-size:19px;">${fmt(mediaInvestido)}</div></div>
       <div class="card"><div class="c-label">Sem reserva de emergência</div><div class="c-value">${totalClientes ? Math.round(semReserva/totalClientes*100) : 0}%</div></div>
       <div class="card" style="cursor:pointer;" onclick="showVencendoList()"><div class="c-label">Ativos vencendo (5 dias)</div><div class="c-value" style="${qtdVencendo > 0 ? 'color:var(--danger);' : ''}">${qtdVencendo}</div></div>
+      <div class="card" style="cursor:pointer;" onclick="showDividendoList()"><div class="c-label">Dividendos a pagar (5 dias)</div><div class="c-value" style="${qtdDividendo > 0 ? 'color:var(--brass);' : ''}">${qtdDividendo}</div></div>
     `;
 
     renderBars(document.getElementById('objetivoBars'), countBy(individual, 'Objetivo principal'), totalClientes);
@@ -538,8 +552,21 @@
   // ---------- calendário de vencimentos ----------
   let calMonthOffset = 0;
 
+  let calMode = 'vencimento';
+  const CAL_FIELD = { vencimento: 'Vencimento', dividendo: 'Data de dividendo' };
+  const CAL_LABEL = { vencimento: 'Vencendo', dividendo: 'Dividendo previsto' };
+
+  function switchCalMode(mode) {
+    calMode = mode;
+    document.getElementById('calToggleVenc').classList.toggle('selected', mode === 'vencimento');
+    document.getElementById('calToggleDiv').classList.toggle('selected', mode === 'dividendo');
+    document.getElementById('calTitle').textContent = mode === 'vencimento' ? 'Vencimentos' : 'Dividendos';
+    renderCalendar(currentClientWhats);
+  }
+
   function renderCalendar(whats) {
     const ativos = ALL_ATIVOS.filter(a => (a['WhatsApp'] || '').toString() === whats);
+    const dateField = CAL_FIELD[calMode];
     const base = new Date();
     const viewDate = new Date(base.getFullYear(), base.getMonth() + calMonthOffset, 1);
     const year = viewDate.getFullYear(), month = viewDate.getMonth();
@@ -552,7 +579,9 @@
 
     const dayMap = {};
     ativos.forEach(a => {
-      const d = new Date(a['Vencimento']);
+      const rawDate = a[dateField];
+      if (!rawDate) return;
+      const d = new Date(rawDate);
       if (!isNaN(d.getTime()) && d.getFullYear() === year && d.getMonth() === month) {
         const day = d.getDate();
         if (!dayMap[day]) dayMap[day] = [];
@@ -588,7 +617,7 @@
 
   function showCalDayAssets(assets) {
     document.getElementById('calAssetList').innerHTML =
-      '<div class="cal-legend">Vencendo nesse dia:</div>' +
+      `<div class="cal-legend">${CAL_LABEL[calMode]} nesse dia:</div>` +
       assets.map(a => `<div class="cal-asset-item">${a['Nome do ativo'] || '—'} — ${a['Corretora'] || '—'}</div>`).join('');
   }
 
@@ -608,10 +637,10 @@
     return Math.round((d0 - t0) / (1000 * 60 * 60 * 24));
   }
 
-  function computeExpiringAssets() {
+  function computeUpcoming(fieldName) {
     const results = [];
     ALL_ATIVOS.forEach(a => {
-      const dias = daysUntil(a['Vencimento']);
+      const dias = daysUntil(a[fieldName]);
       if (dias !== null && dias >= 0 && dias <= 5) {
         const whats = (a['WhatsApp'] || '').toString();
         const cliente = ALL_INDIVIDUAL.find(c => (c['WhatsApp'] || '').toString() === whats);
@@ -621,6 +650,9 @@
     results.sort((a, b) => a.dias - b.dias);
     return results;
   }
+
+  function computeExpiringAssets() { return computeUpcoming('Vencimento'); }
+  function computeUpcomingDividends() { return computeUpcoming('Data de dividendo'); }
 
   function updateVencendoAlert() {
     const list = computeExpiringAssets();
@@ -634,24 +666,31 @@
     }
   }
 
-  function showVencendoList() {
-    const list = computeExpiringAssets();
+  let vencendoScreenType = 'vencimento';
+
+  function showUrgencyList(type) {
+    vencendoScreenType = type;
+    const list = type === 'vencimento' ? computeExpiringAssets() : computeUpcomingDividends();
+    const dateField = type === 'vencimento' ? 'Vencimento' : 'Data de dividendo';
+    const verbo = type === 'vencimento' ? 'Vence' : 'Paga dividendo';
+    document.getElementById('vencendoTitle').textContent = type === 'vencimento' ? 'Ativos vencendo' : 'Dividendos previstos';
+
     const container = document.getElementById('vencendoList');
     container.innerHTML = '';
     if (list.length === 0) {
-      container.innerHTML = '<p style="color:var(--slate); font-size:13px;">Nenhum ativo vencendo nos próximos 5 dias.</p>';
+      container.innerHTML = `<p style="color:var(--slate); font-size:13px;">Nada de ${type === 'vencimento' ? 'vencimento' : 'dividendo'} nos próximos 5 dias.</p>`;
     } else {
       list.forEach(item => {
-        const urgencia = item.dias === 0 ? 'Vence hoje' : item.dias === 1 ? 'Vence amanhã' : `Vence em ${item.dias} dias`;
-        const vencDate = new Date(item.asset['Vencimento']);
-        const vencStr = isNaN(vencDate.getTime()) ? '—' : vencDate.toLocaleDateString('pt-BR');
+        const urgencia = item.dias === 0 ? `${verbo} hoje` : item.dias === 1 ? `${verbo} amanhã` : `${verbo} em ${item.dias} dias`;
+        const d = new Date(item.asset[dateField]);
+        const dStr = isNaN(d.getTime()) ? '—' : d.toLocaleDateString('pt-BR');
         const div = document.createElement('div');
         div.className = 'vencendo-item';
         div.onclick = () => {
           document.getElementById('vencendoScreen').style.display = 'none';
           openClientDetail(item.whats);
         };
-        div.innerHTML = `<div class="v-top"><span class="v-cliente">${item.clienteNome}</span><span class="v-dias">${urgencia}</span></div><div class="v-detail">${item.asset['Nome do ativo'] || '—'} · vence em ${vencStr}</div>`;
+        div.innerHTML = `<div class="v-top"><span class="v-cliente">${item.clienteNome}</span><span class="v-dias">${urgencia}</span></div><div class="v-detail">${item.asset['Nome do ativo'] || '—'} · ${dStr}</div>`;
         container.appendChild(div);
       });
     }
@@ -660,6 +699,9 @@
     document.getElementById('vencendoScreen').style.display = 'block';
     window.scrollTo(0, 0);
   }
+
+  function showVencendoList() { showUrgencyList('vencimento'); }
+  function showDividendoList() { showUrgencyList('dividendo'); }
 
   function backToListFromVencendo() {
     document.getElementById('vencendoScreen').style.display = 'none';
@@ -743,11 +785,23 @@
 
     listEl.innerHTML = ativos.map((a, idx) => {
       const sim = simulateAsset(a);
+      const fmtDate = (v) => {
+        if (!v) return '—';
+        const d = new Date(v);
+        return isNaN(d.getTime()) ? v : d.toLocaleDateString('pt-BR');
+      };
+      const extras = [];
+      if (a['Observação']) extras.push(`<div class="a-item" style="grid-column:1/-1;"><div class="a-label">Observação</div><div class="a-value">${a['Observação']}</div></div>`);
+      if (a['Paga dividendo'] === 'Sim') {
+        extras.push(`<div class="a-item"><div class="a-label">Próximo dividendo</div><div class="a-value">${fmtDate(a['Data de dividendo'])}</div></div>`);
+        extras.push(`<div class="a-item"><div class="a-label">Valor previsto do dividendo</div><div class="a-value">${a['Valor do dividendo'] ? fmt(parseCurrency(a['Valor do dividendo']) || 0) : '—'}</div></div>`);
+      }
       return `<div class="asset-card">
         <div class="a-top">
           <span class="a-name">${a['Nome do ativo'] || '—'}</span>
-          <span style="display:flex; align-items:center; gap:10px;">
+          <span style="display:flex; align-items:center; gap:8px;">
             <span class="a-broker">${a['Corretora'] || '—'}</span>
+            <button class="btn outline small" onclick="editAssetByIndex(${idx})">Editar</button>
             <button class="btn outline small" onclick="deleteAssetByIndex(${idx}, this)">Excluir</button>
           </span>
         </div>
@@ -756,10 +810,11 @@
           <div class="a-item"><div class="a-label">Tipo</div><div class="a-value">${a['Tipo'] || '—'}</div></div>
           <div class="a-item"><div class="a-label">Taxa prevista</div><div class="a-value">${a['Taxa prevista (% a.a.)'] || '—'}% a.a.</div></div>
           <div class="a-item"><div class="a-label">Valor investido</div><div class="a-value">${fmt(parseCurrency(a['Valor investido']) || 0)}</div></div>
-          <div class="a-item"><div class="a-label">Vencimento</div><div class="a-value">${a['Vencimento'] || '—'}</div></div>
+          <div class="a-item"><div class="a-label">Vencimento</div><div class="a-value">${fmtDate(a['Vencimento'])}</div></div>
           <div class="a-item"><div class="a-label">FGC</div><div class="a-value">${a['Garantia FGC'] || '—'}</div></div>
           <div class="a-item"><div class="a-label">IR isento</div><div class="a-value">${a['IR isento'] || '—'}</div></div>
           <div class="a-item"><div class="a-label">Dividendo</div><div class="a-value">${a['Paga dividendo'] || '—'}</div></div>
+          ${extras.join('')}
           <div class="a-item highlight"><div class="a-label">Valor bruto no vencimento</div><div class="a-value">${fmt(sim.valorBruto)}</div></div>
           <div class="a-item"><div class="a-label">IR estimado</div><div class="a-value">${fmt(sim.ir)}</div></div>
           <div class="a-item highlight"><div class="a-label">Valor líquido no vencimento</div><div class="a-value">${fmt(sim.valorLiquido)}</div></div>
@@ -831,7 +886,85 @@
   }
 
   function tryAddAsset(btn) {
-    if (validateAssetForm()) addAsset(btn);
+    if (!validateAssetForm()) return;
+    if (editingAssetRef) updateAsset(btn);
+    else addAsset(btn);
+  }
+
+  function readAssetForm() {
+    return {
+      'Corretora': document.getElementById('a_corretora').value.trim(),
+      'Nome do ativo': document.getElementById('a_nome').value.trim(),
+      'Indexador': document.getElementById('a_indexador').value,
+      'Taxa prevista (% a.a.)': document.getElementById('a_taxa').value,
+      'Tipo': document.getElementById('a_tipo').value,
+      'Paga dividendo': document.getElementById('a_dividendo').value,
+      'Valor investido': document.getElementById('a_valor').value,
+      'Data de investimento': document.getElementById('a_dataInvestimento').value,
+      'Vencimento': document.getElementById('a_vencimento').value,
+      'Garantia FGC': document.getElementById('a_fgc').value,
+      'IR isento': document.getElementById('a_irIsento').value,
+      'Tx administração (% a.a.)': document.getElementById('a_txAdm').value,
+      'Tx performance (%)': document.getElementById('a_txPerformance').value,
+      'Data de dividendo': document.getElementById('a_dataDividendo').value,
+      'Valor do dividendo': document.getElementById('a_valorDividendo').value,
+      'Observação': document.getElementById('a_observacao').value.trim()
+    };
+  }
+
+  function clearAssetForm() {
+    ['a_corretora','a_nome','a_taxa','a_valor','a_dataInvestimento','a_vencimento','a_txAdm','a_txPerformance','a_dataDividendo','a_valorDividendo','a_observacao','a_paste'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('a_txAdm').value = '0';
+    document.getElementById('a_txPerformance').value = '0';
+    document.getElementById('a_indexador').selectedIndex = 0;
+    document.getElementById('a_tipo').selectedIndex = 0;
+    document.getElementById('a_dividendo').selectedIndex = 0;
+    document.getElementById('a_fgc').selectedIndex = 0;
+    document.getElementById('a_irIsento').selectedIndex = 0;
+  }
+
+  function editAssetByIndex(idx) {
+    const ativosDoCliente = ALL_ATIVOS.filter(a => (a['WhatsApp'] || '').toString() === currentClientWhats);
+    const asset = ativosDoCliente[idx];
+    if (!asset) return;
+    editingAssetRef = asset;
+
+    document.getElementById('a_corretora').value = asset['Corretora'] || '';
+    document.getElementById('a_nome').value = asset['Nome do ativo'] || '';
+    setSelectIfMatch('a_indexador', asset['Indexador'] || '');
+    document.getElementById('a_taxa').value = asset['Taxa prevista (% a.a.)'] || '';
+    setSelectIfMatch('a_tipo', asset['Tipo'] || '');
+    setSelectIfMatch('a_dividendo', asset['Paga dividendo'] || 'Não');
+    document.getElementById('a_valor').value = asset['Valor investido'] || '';
+    document.getElementById('a_dataInvestimento').value = toDateInputValue(asset['Data de investimento']);
+    document.getElementById('a_vencimento').value = toDateInputValue(asset['Vencimento']);
+    setSelectIfMatch('a_fgc', asset['Garantia FGC'] || 'Não');
+    setSelectIfMatch('a_irIsento', asset['IR isento'] || 'Não');
+    document.getElementById('a_txAdm').value = asset['Tx administração (% a.a.)'] || '0';
+    document.getElementById('a_txPerformance').value = asset['Tx performance (%)'] || '0';
+    document.getElementById('a_dataDividendo').value = toDateInputValue(asset['Data de dividendo']);
+    document.getElementById('a_valorDividendo').value = asset['Valor do dividendo'] || '';
+    document.getElementById('a_observacao').value = asset['Observação'] || '';
+
+    const btn = document.getElementById('assetSubmitBtn');
+    btn.textContent = 'Salvar alterações';
+    document.getElementById('assetCancelBtn').style.display = 'block';
+    document.querySelector('.form-box').scrollIntoView({behavior:'smooth', block:'start'});
+  }
+
+  function toDateInputValue(v) {
+    if (!v) return '';
+    const d = new Date(v);
+    if (isNaN(d.getTime())) return '';
+    return d.toISOString().split('T')[0];
+  }
+
+  function cancelAssetEdit() {
+    editingAssetRef = null;
+    clearAssetForm();
+    document.getElementById('assetSubmitBtn').textContent = 'Adicionar ativo';
+    document.getElementById('assetCancelBtn').style.display = 'none';
+    document.querySelectorAll('#clientDetail .field.invalid').forEach(f => f.classList.remove('invalid'));
   }
 
   // ---------- colar informações do ativo ----------
@@ -949,19 +1082,7 @@
       _tipo: 'ativos_cliente',
       'ID': Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
       'WhatsApp': currentClientWhats,
-      'Corretora': document.getElementById('a_corretora').value.trim(),
-      'Nome do ativo': document.getElementById('a_nome').value.trim(),
-      'Indexador': document.getElementById('a_indexador').value,
-      'Taxa prevista (% a.a.)': document.getElementById('a_taxa').value,
-      'Tipo': document.getElementById('a_tipo').value,
-      'Paga dividendo': document.getElementById('a_dividendo').value,
-      'Valor investido': document.getElementById('a_valor').value,
-      'Data de investimento': document.getElementById('a_dataInvestimento').value,
-      'Vencimento': document.getElementById('a_vencimento').value,
-      'Garantia FGC': document.getElementById('a_fgc').value,
-      'IR isento': document.getElementById('a_irIsento').value,
-      'Tx administração (% a.a.)': document.getElementById('a_txAdm').value,
-      'Tx performance (%)': document.getElementById('a_txPerformance').value
+      ...readAssetForm()
     };
     if (!payload['Nome do ativo'] || !payload['Valor investido']) {
       alert('Preenche pelo menos o nome do ativo e o valor investido.');
@@ -982,15 +1103,58 @@
       renderClientCharts(currentClientWhats);
       renderCalendar(currentClientWhats);
       updateVencendoAlert();
-      ['a_corretora','a_nome','a_taxa','a_valor','a_dataInvestimento','a_vencimento','a_txAdm','a_txPerformance'].forEach(id => document.getElementById(id).value = '');
-      document.getElementById('a_txAdm').value = '0';
-      document.getElementById('a_txPerformance').value = '0';
+      clearAssetForm();
       btn.textContent = 'Salvo ✓';
       setTimeout(() => { btn.textContent = original; }, 1800);
     } catch (err) {
       alert('Não consegui salvar na planilha. Confere sua conexão e se o link/chave estão certos.\n\nDetalhe: ' + err.message);
       console.error(err);
       btn.textContent = original;
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function updateAsset(btn) {
+    const asset = editingAssetRef;
+    if (!asset) return;
+
+    const identifier = asset['ID']
+      ? { ID: asset['ID'] }
+      : { match: {
+          'WhatsApp': asset['WhatsApp'] || '',
+          'Nome do ativo': asset['Nome do ativo'] || '',
+          'Corretora': asset['Corretora'] || '',
+          'Valor investido': asset['Valor investido'] || ''
+        } };
+
+    const updates = readAssetForm();
+    const payload = { _tipo: 'ativos_cliente', _action: 'update', ...identifier, updates };
+
+    const original = btn.textContent;
+    btn.textContent = 'Salvando...';
+    btn.disabled = true;
+
+    try {
+      const res = await fetch(SHEETS_WEBHOOK_URL, { method: 'POST', body: JSON.stringify(payload) });
+      const data = await res.json();
+      if (data.status !== 'ok') throw new Error(data.message || 'erro desconhecido');
+
+      Object.assign(asset, updates);
+      renderAssets(currentClientWhats);
+      renderClientCharts(currentClientWhats);
+      renderCalendar(currentClientWhats);
+      updateVencendoAlert();
+      editingAssetRef = null;
+      clearAssetForm();
+      document.getElementById('assetSubmitBtn').textContent = 'Adicionar ativo';
+      document.getElementById('assetCancelBtn').style.display = 'none';
+      btn.textContent = 'Salvo ✓';
+      setTimeout(() => { btn.textContent = 'Adicionar ativo'; }, 1800);
+    } catch (err) {
+      alert('Não consegui salvar a alteração na planilha.\n\nDetalhe: ' + err.message);
+      console.error(err);
+      btn.textContent = 'Salvar alterações';
     } finally {
       btn.disabled = false;
     }
