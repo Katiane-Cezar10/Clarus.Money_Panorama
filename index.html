@@ -109,6 +109,15 @@
   .indexer-title { font-size:12px; color:var(--slate); margin-bottom:12px; line-height:1.4; }
   .indexer-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(140px,1fr)); gap:12px; }
   .indexer-grid .field { margin-bottom:0; }
+
+  .dist-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(160px,1fr)); gap:14px; margin-bottom:14px; }
+  .dist-card { background:var(--ink-2); border:1px solid var(--ink-3); border-radius:14px; padding:16px; }
+  .dist-card-title { font-family:var(--font-display); font-size:15px; font-weight:600; color:var(--brass); margin-bottom:12px; }
+  .dist-card .field { margin-bottom:10px; }
+  .dist-card .field:last-child { margin-bottom:0; }
+  .dist-warning { background:rgba(255,107,87,0.12); border:1px solid var(--danger); color:var(--danger); font-size:12.5px; padding:10px 14px; border-radius:8px; margin-bottom:14px; }
+  .dist-taxa-result { font-size:14px; color:var(--parchment); margin-bottom:6px; }
+  .dist-taxa-result strong { color:var(--brass); font-family:var(--font-display); font-size:17px; }
   .asset-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(130px,1fr)); gap:8px 16px; font-size:12.5px; }
   .asset-grid .a-item .a-label { color:var(--slate); font-size:10px; text-transform:uppercase; letter-spacing:.04em; }
   .asset-grid .a-item .a-value { color:var(--parchment); }
@@ -362,6 +371,38 @@
         </table>
       </div>
       <p class="disclaimer">Simulação hipotética com a taxa que você informar, só pra fins de organização e planejamento. Não é promessa de rentabilidade nem recomendação de nenhum produto específico — rentabilidade passada ou simulada não garante resultado futuro.</p>
+
+      <div class="section-title">Simulador por distribuição de ativos</div>
+      <p class="intro-text" style="margin-bottom:16px;">Usa o mesmo valor atual, aporte e prazo do simulador acima, mas calcula a taxa combinando o que você alocar em cada categoria.</p>
+
+      <div class="dist-grid">
+        <div class="dist-card">
+          <div class="dist-card-title">Renda Fixa</div>
+          <div class="field"><label>% do patrimônio</label><div class="input-suffix"><input type="number" id="dist_pctFixa" value="40" oninput="calcularDistribuicao()"><span class="suffix">%</span></div></div>
+          <div class="field"><label>Rendimento esperado</label><div class="input-suffix"><input type="number" id="dist_rendFixa" value="12" step="0.1" oninput="calcularDistribuicao()"><span class="suffix">%</span></div></div>
+        </div>
+        <div class="dist-card">
+          <div class="dist-card-title">Renda Variável</div>
+          <div class="field"><label>% do patrimônio</label><div class="input-suffix"><input type="number" id="dist_pctVar" value="30" oninput="calcularDistribuicao()"><span class="suffix">%</span></div></div>
+          <div class="field"><label>Rendimento esperado</label><div class="input-suffix"><input type="number" id="dist_rendVar" value="15" step="0.1" oninput="calcularDistribuicao()"><span class="suffix">%</span></div></div>
+        </div>
+        <div class="dist-card">
+          <div class="dist-card-title">Cripto</div>
+          <div class="field"><label>% do patrimônio</label><div class="input-suffix"><input type="number" id="dist_pctCripto" value="10" oninput="calcularDistribuicao()"><span class="suffix">%</span></div></div>
+          <div class="field"><label>Rendimento esperado</label><div class="input-suffix"><input type="number" id="dist_rendCripto" value="25" step="0.1" oninput="calcularDistribuicao()"><span class="suffix">%</span></div></div>
+        </div>
+        <div class="dist-card">
+          <div class="dist-card-title">Fundos</div>
+          <div class="field"><label>% do patrimônio</label><div class="input-suffix"><input type="number" id="dist_pctFundos" value="20" oninput="calcularDistribuicao()"><span class="suffix">%</span></div></div>
+          <div class="field"><label>Rendimento esperado</label><div class="input-suffix"><input type="number" id="dist_rendFundos" value="13" step="0.1" oninput="calcularDistribuicao()"><span class="suffix">%</span></div></div>
+        </div>
+      </div>
+
+      <p class="dist-warning" id="distWarning" style="display:none;"></p>
+      <div class="dist-taxa-result">Taxa combinada resultante: <strong id="distTaxaResult">—</strong></div>
+
+      <div class="cards" id="distResultCards" style="margin-top:14px;"></div>
+      <p class="disclaimer">Mesma lógica do simulador acima, só que a taxa usada é a média ponderada dos percentuais e rendimentos que você definir pra cada categoria. Ajuste livre, sem relação com os ativos já cadastrados nos clientes.</p>
     </div>
 
   </div>
@@ -1509,15 +1550,9 @@
     return svg;
   }
 
-  function simular() {
-    const atual = parseCurrencyValue(document.getElementById('sim_atual').value);
-    const aporte = parseCurrencyValue(document.getElementById('sim_aporte').value);
-    const taxaAno = parseFloat(document.getElementById('sim_taxa').value) || 0;
-    const anos = Math.max(1, parseInt(document.getElementById('sim_anos').value) || 1);
-
+  function runGrowthSimulation(atual, aporte, taxaAno, anos) {
     const taxaMensal = Math.pow(1 + taxaAno / 100, 1 / 12) - 1;
     const meses = anos * 12;
-
     let saldo = atual, aportado = atual, saldoAnoAnterior = atual;
     const linhas = [{ x: 0, y: atual }];
     const tabelaLinhas = [];
@@ -1531,29 +1566,77 @@
         saldoAnoAnterior = saldo;
       }
     }
-
     const rendimentoTotal = saldo - aportado;
-    const rendimentoMedioMensal = rendimentoTotal / meses;
+    const rendaMensalFinal = saldo * taxaMensal;
+    return { saldo, aportado, rendimentoTotal, rendaMensalFinal, linhas, tabelaLinhas };
+  }
+
+  function simular() {
+    const atual = parseCurrencyValue(document.getElementById('sim_atual').value);
+    const aporte = parseCurrencyValue(document.getElementById('sim_aporte').value);
+    const taxaAno = parseFloat(document.getElementById('sim_taxa').value) || 0;
+    const anos = Math.max(1, parseInt(document.getElementById('sim_anos').value) || 1);
+
+    const r = runGrowthSimulation(atual, aporte, taxaAno, anos);
     const fmt = n => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
 
-    document.getElementById('simChart').innerHTML = buildLineChartSVG(linhas);
+    document.getElementById('simChart').innerHTML = buildLineChartSVG(r.linhas);
 
     document.getElementById('simResultCards').innerHTML = `
-      <div class="card"><div class="c-label">Patrimônio estimado</div><div class="c-value">${fmt(saldo)}</div></div>
-      <div class="card"><div class="c-label">Total aportado</div><div class="c-value" style="font-size:20px;">${fmt(aportado)}</div></div>
-      <div class="card"><div class="c-label">Rendimento estimado</div><div class="c-value" style="font-size:20px;">${fmt(rendimentoTotal)}</div></div>
-      <div class="card"><div class="c-label">Rendimento médio por mês</div><div class="c-value" style="font-size:20px;">${fmt(rendimentoMedioMensal)}</div></div>
+      <div class="card"><div class="c-label">Patrimônio estimado</div><div class="c-value">${fmt(r.saldo)}</div></div>
+      <div class="card"><div class="c-label">Total aportado</div><div class="c-value" style="font-size:20px;">${fmt(r.aportado)}</div></div>
+      <div class="card"><div class="c-label">Rendimento estimado</div><div class="c-value" style="font-size:20px;">${fmt(r.rendimentoTotal)}</div></div>
+      <div class="card"><div class="c-label">Renda mensal estimada (ao final)</div><div class="c-value" style="font-size:20px;">${fmt(r.rendaMensalFinal)}</div></div>
     `;
 
     const tbody = document.querySelector('#simTable tbody');
     tbody.innerHTML = '';
-    tabelaLinhas.forEach(l => {
+    r.tabelaLinhas.forEach(l => {
       const tr = document.createElement('tr');
       tr.innerHTML = `<td>Ano ${l.ano}</td><td>${fmt(l.aportado)}</td><td>${fmt(l.saldo)}</td><td>${fmt(l.rendimentoAno)}</td>`;
       tbody.appendChild(tr);
     });
     document.getElementById('simTableTitle').style.display = 'block';
     document.getElementById('simTableWrap').style.display = 'block';
+
+    calcularDistribuicao();
+  }
+
+  function calcularDistribuicao() {
+    const pctFixa = parseFloat(document.getElementById('dist_pctFixa').value) || 0;
+    const rendFixa = parseFloat(document.getElementById('dist_rendFixa').value) || 0;
+    const pctVar = parseFloat(document.getElementById('dist_pctVar').value) || 0;
+    const rendVar = parseFloat(document.getElementById('dist_rendVar').value) || 0;
+    const pctCripto = parseFloat(document.getElementById('dist_pctCripto').value) || 0;
+    const rendCripto = parseFloat(document.getElementById('dist_rendCripto').value) || 0;
+    const pctFundos = parseFloat(document.getElementById('dist_pctFundos').value) || 0;
+    const rendFundos = parseFloat(document.getElementById('dist_rendFundos').value) || 0;
+
+    const pctTotal = pctFixa + pctVar + pctCripto + pctFundos;
+    const warnEl = document.getElementById('distWarning');
+    if (Math.abs(pctTotal - 100) > 0.5) {
+      warnEl.style.display = 'block';
+      warnEl.textContent = `Atenção: os percentuais somam ${pctTotal.toFixed(1)}%, não 100%. O cálculo abaixo usa exatamente o que foi preenchido, então o resultado pode não representar o patrimônio inteiro.`;
+    } else {
+      warnEl.style.display = 'none';
+    }
+
+    const taxaBlend = (pctFixa * rendFixa + pctVar * rendVar + pctCripto * rendCripto + pctFundos * rendFundos) / 100;
+    document.getElementById('distTaxaResult').textContent = taxaBlend.toFixed(2) + '% a.a.';
+
+    const atual = parseCurrencyValue(document.getElementById('sim_atual').value);
+    const aporte = parseCurrencyValue(document.getElementById('sim_aporte').value);
+    const anos = Math.max(1, parseInt(document.getElementById('sim_anos').value) || 1);
+
+    const r = runGrowthSimulation(atual, aporte, taxaBlend, anos);
+    const fmt = n => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
+
+    document.getElementById('distResultCards').innerHTML = `
+      <div class="card"><div class="c-label">Patrimônio estimado</div><div class="c-value">${fmt(r.saldo)}</div></div>
+      <div class="card"><div class="c-label">Total aportado</div><div class="c-value" style="font-size:20px;">${fmt(r.aportado)}</div></div>
+      <div class="card"><div class="c-label">Rendimento estimado</div><div class="c-value" style="font-size:20px;">${fmt(r.rendimentoTotal)}</div></div>
+      <div class="card"><div class="c-label">Renda mensal estimada (ao final)</div><div class="c-value" style="font-size:20px;">${fmt(r.rendaMensalFinal)}</div></div>
+    `;
   }
 </script>
 </body>
